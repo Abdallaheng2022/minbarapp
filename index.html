@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مِنبَر — منبرك الرقمي لتحرير المحاضرات بالنص</title>
+<meta name="description" content="مِنبَر: فرّغ محاضرتك إلى نص، حرّر بالنص لا بالتايم‌لاين، واقصّ بالوصف الذكي — كل ذلك مجانًا في متصفحك.">
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- ffmpeg.wasm (للقصّ في المتصفح) -->
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+<style>
+:root{--gold:#a9802f;--ink:#1a1712;--paper:#fbf8f2;--line:#e6dcc8;--rem:#b3261e}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Tajawal',sans-serif;background:var(--paper);color:var(--ink);line-height:1.7}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 22px;background:#fff;border-bottom:1px solid var(--line);flex-wrap:wrap;position:sticky;top:0;z-index:10}
+.brand{font-family:'Amiri',serif;font-size:1.5rem;color:var(--gold);font-weight:700}
+.inp{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;margin-inline-end:4px}
+.btn{padding:8px 14px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-family:inherit;font-size:.95rem}
+.btn:hover{background:var(--paper)}
+.btn.gold{background:var(--gold);color:#fff;border-color:var(--gold)}
+.btn.primary{background:#0b6b3a;color:#fff;border-color:#0b6b3a}
+.wrap{max-width:960px;margin:0 auto;padding:24px 18px}
+.muted{color:#8a7f6a;font-size:.9rem}
+.drop{border:2px dashed var(--gold);border-radius:16px;padding:50px 20px;text-align:center;background:#fff;cursor:pointer}
+#editor{display:none;margin-top:20px}
+video{width:100%;border-radius:12px;background:#000;max-height:340px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.smartrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#fff7e6;border:1px solid #e6c36b;border-radius:12px;padding:10px;margin:10px 0}
+.smartrow input{flex:1;min-width:200px;padding:9px 11px;border:1px solid #e6c36b;border-radius:8px;font-family:inherit}
+#doc{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;font-size:1.15rem;max-height:360px;overflow:auto;text-align:justify}
+.w{cursor:pointer;border-radius:4px;padding:0 1px}
+.w:hover{background:#f0e9d8}
+.w.rem{color:var(--rem);text-decoration:line-through;opacity:.55}
+.w.smartcut{background:#ffd9d9;color:#7a1010;text-decoration:line-through;box-shadow:inset 0 -2px 0 #e64545}
+.w.filler{border-bottom:2px dotted var(--gold)}
+.w.edited{background:#fff3c4}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-top:12px}
+#status{font-size:.92rem;color:#5a4f3a;min-height:22px;margin-top:8px}
+#toast{display:none;position:fixed;bottom:20px;inset-inline-start:20px;background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;z-index:50}
+.hint{font-size:.82rem;color:#8a7f6a;margin-top:6px}
+select.inp{cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">🕌 مِنبَر</div>
+  <div id="authBox" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"></div>
+</header>
+
+<div class="wrap">
+  <div class="drop" id="dropZone">
+    <h2 style="margin:0 0 8px">ارفع محاضرتك ليبدأ التفريغ</h2>
+    <p class="muted">فيديو أو صوت — يُفرّغ في متصفحك ويُحرّر بالنص. النسخة المجانية: أول ٥ دقائق.</p>
+    <div style="margin:14px 0;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap">
+      <label class="muted">اللغة:</label>
+      <select id="lang" class="inp">
+        <option value="ar">العربية</option><option value="en">English</option>
+        <option value="tr">Türkçe</option><option value="hi">हिन्दी</option>
+        <option value="es">Español</option><option value="de">Deutsch</option>
+        <option value="fr">Français</option><option value="ru">Русский</option>
+      </select>
+      <button class="btn gold" id="pickBtn">📁 اختر ملفًا</button>
+    </div>
+    <input type="file" id="fileInput" accept="video/*,audio/*" style="display:none">
+    <p class="hint">كل المعالجة تتم في متصفحك. التفريغ والذكاء عبر مزوّدين مجانيين بالتناوب.</p>
+  </div>
+
+  <div id="editor">
+    <video id="video" controls></video>
+    <div class="toolbar">
+      <button class="btn" id="fillerBtn">✨ احذف الحشو</button>
+      <button class="btn gold" id="fixBtn">📝 صحّح النص لغويًا</button>
+    </div>
+    <div class="smartrow">
+      <span style="font-weight:700">✂️</span>
+      <input id="smartInput" placeholder="اكتب ما تريد قصّه: «احذف المقدمة والكلام الجانبي»">
+      <button class="btn gold" id="smartBtn">✂️ اقترح القص</button>
+      <button class="btn primary" id="smartApply" style="display:none">✓ طبّق الحذف</button>
+    </div>
+    <p class="hint">اضغط أي كلمة لحذفها/استرجاعها. الكلمات الحمراء تُحذف من الفيديو عند التصدير.</p>
+    <div id="doc"></div>
+    <div class="bar">
+      <span id="stats" class="muted"></span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="dlTxt">⬇ نص</button>
+        <button class="btn" id="dlJson">⬇ JSON</button>
+        <button class="btn primary" id="exportBtn">⬇ صدّر الفيديو بعد القص</button>
+      </div>
+    </div>
+    <div id="status"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
